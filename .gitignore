@@ -1,0 +1,10 @@
+# Docker
+.env
+volumes/
+*.sqlite
+__pycache__/
+
+# Airflow specific folders
+dags/.airflowignore
+logs/
+config/

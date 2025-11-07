@@ -1,0 +1,90 @@
+# يُفضل عدم استخدام 'version' في الإصدارات الحديثة من Docker Compose
+services:
+  # 1. قاعدة بيانات Airflow الخلفية (Metadata DB) - نستخدم Postgres هنا
+  # لتجنب مشاكل التكوين مع MySQL كقاعدة بيانات خلفية
+  postgres:
+    image: postgres:13
+    environment:
+      - POSTGRES_USER=airflow
+      - POSTGRES_PASSWORD=airflow
+      - POSTGRES_DB=airflow
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 5s
+      timeout: 5s
+      retries: 50
+
+  # 2. قاعدة بيانات البيانات (Data Warehouse) - نستخدم MySQL هنا لبياناتك
+  mysql_db:
+    image: mysql:8.0
+    environment:
+      - MYSQL_ROOT_PASSWORD=airflow_root
+      - MYSQL_DATABASE=airflow_db
+      - MYSQL_USER=airflow_user
+      - MYSQL_PASSWORD=airflow_user
+    ports:
+      - "3308:3306"
+    command: --default-authentication-plugin=mysql_native_password
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+    # اسم هذه الخدمة هو الذي يجب أن تستخدميه عند إنشاء الـ Connection ID في Airflow (host)
+
+  # 3. Redis - للتخزين المؤقت والـ Celery (إذا كنتِ تستخدمينه)
+  redis:
+    image: redis:latest
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # 4. Airflow Scheduler - لجدولة المهام
+  airflow-scheduler:
+    # يجب أن تستخدمي الصورة التي قمتِ ببنائها (الصورة التي تم فيها تثبيت المزودات)
+    build: . 
+    image: ${AIRFLOW_IMAGE_NAME:-airflow:latest}
+    command: scheduler
+    depends_on:
+      - postgres
+      - redis
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./logs:/opt/airflow/logs
+      - ./config:/opt/airflow/config
+    environment:
+      # إعدادات Airflow للاتصال بالـ Postgres
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql://airflow:airflow@postgres:5432/airflow
+      # إعدادات الـ Executor
+      - AIRFLOW__EXECUTOR__EXECUTOR=SequentialExecutor
+      - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@postgres:5432/airflow
+      - AIRFLOW__CELERY__BROKER_URL=redis://redis:6379/0
+      # إعدادات إضافية
+      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+    restart: always
+
+  # 5. Airflow Webserver - للواجهة الرسومية
+  airflow-webserver:
+    build: .
+    image: ${AIRFLOW_IMAGE_NAME:-airflow:latest}
+    command: webserver
+    depends_on:
+      - postgres
+      - redis
+    ports:
+      - "8080:8080" # الواجهة الرسومية
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./logs:/opt/airflow/logs
+      - ./config:/opt/airflow/config
+    environment:
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql://airflow:airflow@postgres:5432/airflow
+      - AIRFLOW__EXECUTOR__EXECUTOR=SequentialExecutor
+      - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@postgres:5432/airflow
+      - AIRFLOW__CELERY__BROKER_URL=redis://redis:6379/0
+      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+    restart: always
